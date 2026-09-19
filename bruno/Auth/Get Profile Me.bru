@@ -1,0 +1,19 @@
+meta {
+  name: Get Profile Me
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+vars:pre-request {
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjNTg3MzVlZi0zMjk1LTRjMDgtODU3Yi01YTM5NWZkMjE5YjgiLCJlbWFpbCI6InRyYXZlbGVyMkByb2FtaWVzLmFwcCIsImlhdCI6MTc4OTgxMzQ5NywiZXhwIjoxNzkwNDE4Mjk3fQ.qgL3jaGW6GEwpXiwAg_wl7m4qImab59c7wH6UPar1hU
+}

@@ -46,3 +46,4 @@ skills-lock.json
 !.env.example
 
 /generated/prisma
+/uploads
