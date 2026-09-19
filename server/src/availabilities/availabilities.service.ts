@@ -204,6 +204,17 @@ export class AvailabilitiesService {
       };
     }
 
+    // ตรวจสอบว่าสมาชิกคนไหนส่งวันว่างเข้ามาในทริปนี้แล้วบ้าง
+    const allSubmittedAvailabilities = await this.prisma.availability.findMany({
+      where: { tripId },
+      select: { userId: true },
+    });
+    const submittedUserIds = new Set(allSubmittedAvailabilities.map((a) => a.userId));
+    const submittedMembers = allMembers.filter((m) => submittedUserIds.has(m.id));
+    const pendingMembers = allMembers.filter((m) => !submittedUserIds.has(m.id));
+    const submittedCount = submittedMembers.length;
+    const pendingCount = pendingMembers.length;
+
     // ดึงวันว่างทั้งหมดในทริป ที่สถานะ AVAILABLE หรือ PREFERRED
     const availabilities = await this.prisma.availability.findMany({
       where: {
@@ -221,8 +232,12 @@ export class AvailabilitiesService {
       return {
         tripId,
         tripTitle: trip.title,
-        tripStartDate: trip.startDate,
+        tripStartDate: trip.startDate ? trip.startDate.toISOString().slice(0, 10) : null,
         totalMembers,
+        submittedCount: 0,
+        pendingCount: totalMembers,
+        submittedMembers: [],
+        pendingMembers,
         message: 'ยังไม่มีสมาชิกใส่วันว่างในทริปนี้',
         perfectMatchRanges: [],
         bestMatchRanges: [],
@@ -252,8 +267,12 @@ export class AvailabilitiesService {
       return {
         tripId,
         tripTitle: trip.title,
-        tripStartDate: trip.startDate,
+        tripStartDate: trip.startDate ? trip.startDate.toISOString().slice(0, 10) : null,
         totalMembers,
+        submittedCount,
+        pendingCount,
+        submittedMembers,
+        pendingMembers,
         message: 'วันว่างที่สมาชิกระบุ อยู่ก่อนวัน startDate ของทริป',
         perfectMatchRanges: [],
         bestMatchRanges: [],
@@ -265,10 +284,15 @@ export class AvailabilitiesService {
       date: string;
       availableCount: number;
       totalMembers: number;
+      submittedCount: number;
+      pendingCount: number;
       matchPercentage: number;
+      submittedMatchPercentage: number;
       isAllAvailable: boolean;
+      isAllSubmittedAvailable: boolean;
       availableMembers: typeof allMembers;
       busyMembers: typeof allMembers;
+      pendingMembers: typeof allMembers;
     }> = [];
 
     // วนลูปตรวจสอบทีละวัน
@@ -293,10 +317,17 @@ export class AvailabilitiesService {
       }
 
       const availableMembers = allMembers.filter((m) => availableUserIds.has(m.id));
-      const busyMembers = allMembers.filter((m) => !availableUserIds.has(m.id));
+      // busyMembers คือคนที่เคยส่งวันว่างแล้ว แต่ "ไม่ว่างในวันนี้"
+      const busyMembers = submittedMembers.filter((m) => !availableUserIds.has(m.id));
+      // pendingMembers คือคนที่ยังไม่เคยกดใส่วันว่างในทริปนี้เลย
+      const notSubmittedMembers = pendingMembers;
+
       const availableCount = availableMembers.length;
-      const isAllAvailable = availableCount === totalMembers;
+      const isAllAvailable = availableCount === totalMembers && totalMembers > 0;
+      const isAllSubmittedAvailable = submittedCount > 0 && availableCount === submittedCount;
       const matchPercentage = Math.round((availableCount / totalMembers) * 100);
+      const submittedMatchPercentage =
+        submittedCount > 0 ? Math.round((availableCount / submittedCount) * 100) : 0;
 
       if (availableCount > maxAvailableCount) {
         maxAvailableCount = availableCount;
@@ -306,18 +337,30 @@ export class AvailabilitiesService {
         date: currentDateStr,
         availableCount,
         totalMembers,
+        submittedCount,
+        pendingCount,
         matchPercentage,
+        submittedMatchPercentage,
         isAllAvailable,
+        isAllSubmittedAvailable,
         availableMembers,
         busyMembers,
+        pendingMembers: notSubmittedMembers,
       });
 
       current.setUTCDate(current.getUTCDate() + 1);
     }
 
-    // รวมช่วงวันที่มีคนว่างตรงกันทุกคน (Perfect Match Ranges)
+    // รวมช่วงวันที่มีคนว่างตรงกันทุกคน
+    // ถ้าทุกคนกรอกครบแล้ว: เช็ค isAllAvailable
+    // ถ้ายังมีคนไม่กรอก: เช็ค isAllSubmittedAvailable (คนที่กรอกแล้วว่างตรงกันทุกคน)
+    const targetMatchFilter =
+      pendingCount === 0
+        ? dailyMatches.filter((d) => d.isAllAvailable)
+        : dailyMatches.filter((d) => d.isAllSubmittedAvailable);
+
     const perfectMatchRanges = this.extractConsecutiveRanges(
-      dailyMatches.filter((d) => d.isAllAvailable).map((d) => d.date),
+      targetMatchFilter.map((d) => d.date),
     );
 
     // รวมช่วงวันที่มีคนว่างเยอะที่สุด (Best Match Ranges)
@@ -333,6 +376,15 @@ export class AvailabilitiesService {
       tripTitle: trip.title,
       tripStartDate: trip.startDate ? trip.startDate.toISOString().slice(0, 10) : null,
       totalMembers,
+      submittedCount,
+      pendingCount,
+      submittedMembers,
+      pendingMembers, // รายชื่อคนที่ยังไม่ได้กรอกวันว่าง
+      isWaitingForPending: pendingCount > 0,
+      statusMessage:
+        pendingCount > 0
+          ? `มีสมาชิก ${pendingCount} คนยังไม่ได้กรอกวันว่าง (${pendingMembers.map((m) => m.name || 'ไม่ระบุชื่อ').join(', ')}) โดยคนที่กรอกแล้วว่างตรงกันตามช่วงวันที่แสดง`
+          : 'สมาชิกทุกคนกรอกวันว่างครบถ้วนแล้ว',
       maxAvailableCount,
       perfectMatchRanges,
       bestMatchRanges,
