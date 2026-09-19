@@ -1,0 +1,20 @@
+meta {
+  name: Confirm Settlement
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/trips/{{tripId}}/settlements/{{settlementId}}/confirm
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  ownerToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTI0NzQxNy02Y2IyLTQ3NWMtOTVmNy1hNjAzMzRhYjY0NjQiLCJlbWFpbCI6InNvbWNoYWlAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MjA0MzcsImV4cCI6MTc5MDQyNTIzN30.Yn6cssqrhWM0Dg6fnsP1_NWNwAAujF6R6ihXWLOxFB8
+}

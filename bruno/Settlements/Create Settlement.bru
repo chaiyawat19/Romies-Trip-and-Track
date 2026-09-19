@@ -1,0 +1,39 @@
+meta {
+  name: Create Settlement
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/settlements
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "payeeId": "7a247417-6cb2-475c-95f7-a60334ab6464",
+    "amount": 500,
+    "currency": "THB",
+    "notes": "โอนคืนค่ามื้อค่ำร้านอาหารริมผาเรียบร้อยครับ"
+  }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("settlementId", res.body.id);
+  }
+}

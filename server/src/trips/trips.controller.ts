@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   UploadedFile,
@@ -16,6 +18,7 @@ import { extname } from 'path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { JoinTripDto } from './dto/join-trip.dto';
+import { UpdateTripDto } from './dto/update-trip.dto';
 import { TripsService } from './trips.service';
 
 const multerConfig = {
@@ -105,5 +108,52 @@ export class TripsController {
       ...dto,
       inviteCode: code,
     });
+  }
+
+  /**
+   * แก้ไขข้อมูลทริป (รองรับอัปโหลดรูปปกใหม่)
+   * PATCH /trips/:id
+   */
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('coverImage', multerConfig))
+  async update(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() dto: UpdateTripDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let imageUrl: string | undefined = undefined;
+    if (file) {
+      const host = req.get('host') || 'localhost:3001';
+      const protocol = req.protocol || 'http';
+      imageUrl = `${protocol}://${host}/uploads/trips/${file.filename}`;
+    }
+
+    return this.tripsService.update(id, req.user.id, dto, imageUrl);
+  }
+
+  /**
+   * นำสมาชิกออกจากทริป หรือ สมาชิกออกจากทริปด้วยตนเอง
+   * DELETE /trips/:id/members/:userId
+   */
+  @Delete(':id/members/:userId')
+  @UseGuards(JwtAuthGuard)
+  async removeMember(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+  ) {
+    return this.tripsService.removeMember(id, req.user.id, userId);
+  }
+
+  /**
+   * ลบทริป (เฉพาะ OWNER)
+   * DELETE /trips/:id
+   */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  async remove(@Param('id') id: string, @Req() req: any) {
+    return this.tripsService.remove(id, req.user.id);
   }
 }

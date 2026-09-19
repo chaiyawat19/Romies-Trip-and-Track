@@ -1,0 +1,20 @@
+meta {
+  name: Get Trip Settlements
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/trips/{{tripId}}/settlements
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
+}

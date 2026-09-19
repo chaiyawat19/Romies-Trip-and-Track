@@ -10,6 +10,7 @@ import { ProvincesModule } from './provinces/provinces.module';
 import { TodosModule } from './todos/todos.module';
 import { AvailabilitiesModule } from './availabilities/availabilities.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { SettlementsModule } from './settlements/settlements.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ExpensesModule } from './expenses/expenses.module';
     TodosModule,
     AvailabilitiesModule,
     ExpensesModule,
+    SettlementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

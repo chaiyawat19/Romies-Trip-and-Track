@@ -1,0 +1,32 @@
+meta {
+  name: Update Trip
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/trips/{{tripId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "title": "อันดามัน เที่ยว 3 เกาะ 3 จังหวัด (อัปเดตวันและงบประมาณ)",
+    "budgetAmount": 25000,
+    "startDate": "2026-11-20"
+  }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  ownerToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTI0NzQxNy02Y2IyLTQ3NWMtOTVmNy1hNjAzMzRhYjY0NjQiLCJlbWFpbCI6InNvbWNoYWlAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MjA0MzcsImV4cCI6MTc5MDQyNTIzN30.Yn6cssqrhWM0Dg6fnsP1_NWNwAAujF6R6ihXWLOxFB8
+}

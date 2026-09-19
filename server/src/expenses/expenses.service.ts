@@ -4,12 +4,23 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SettlementStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EXPENSE_CATEGORIES } from './data/expense-categories.data';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
 import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
 import { CreateHybridExpenseDto } from './dto/create-hybrid-expense.dto';
+import { UpdateExpenseDto } from './dto/update-expense.dto';
+
+export interface TransferSuggestion {
+  fromUserId: string;
+  fromUserName: string;
+  fromUserAvatar: string | null;
+  toUserId: string;
+  toUserName: string;
+  toUserAvatar: string | null;
+  amount: number;
+}
 
 @Injectable()
 export class ExpensesService {
@@ -925,5 +936,277 @@ export class ExpensesService {
     }
 
     return expense;
+  }
+
+  /**
+   * คำนวณสรุปยอดหนี้คงค้างในทริป และรายการโอนหนี้ที่สั้นที่สุด (Debt Simplification)
+   */
+  async getTripBalances(tripId: string, currentUserId: string) {
+    try {
+      const trip = await this.ensureTripAndMembership(tripId, currentUserId);
+
+    // 1. ดึงบิลค่าใช้จ่ายและส่วนแบ่งทั้งหมด
+    const expenses = await this.prisma.expense.findMany({
+      where: { tripId },
+      include: {
+        splits: true,
+      },
+    });
+
+    // 2. ดึงการเคลียร์เงินที่ CONFIRMED แล้วทั้งหมด
+    const settlements = await this.prisma.settlement.findMany({
+      where: { tripId, status: SettlementStatus.CONFIRMED },
+    });
+
+    // 3. รวบรวมข้อมูลสมาชิกทั้งหมด
+    const memberMap = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        email: string;
+        avatarUrl: string | null;
+        totalPaid: number;
+        totalShare: number;
+        settlementPaid: number;
+        settlementReceived: number;
+        netBalance: number;
+        status: 'CREDITOR' | 'DEBTOR' | 'SETTLED';
+      }
+    >();
+
+    for (const m of trip.members) {
+      memberMap.set(m.userId, {
+        userId: m.userId,
+        name: m.user.name || m.user.email || 'สมาชิกในทริป',
+        email: m.user.email,
+        avatarUrl: m.user.avatarUrl,
+        totalPaid: 0,
+        totalShare: 0,
+        settlementPaid: 0,
+        settlementReceived: 0,
+        netBalance: 0,
+        status: 'SETTLED',
+      });
+    }
+
+    // รวมยอดที่จ่าย (Payer) และยอดที่เป็นส่วนแบ่ง (Split)
+    let totalExpensesAmount = 0;
+    for (const exp of expenses) {
+      const expTotal = Number(exp.totalAmount);
+      totalExpensesAmount += expTotal;
+
+      if (memberMap.has(exp.paidById)) {
+        memberMap.get(exp.paidById)!.totalPaid += expTotal;
+      }
+
+      for (const split of exp.splits) {
+        if (memberMap.has(split.userId)) {
+          memberMap.get(split.userId)!.totalShare += Number(split.amount);
+        }
+      }
+    }
+
+    // รวมยอดการเคลียร์เงินที่ผ่านแล้ว
+    let totalSettledAmount = 0;
+    for (const set of settlements) {
+      const setAmount = Number(set.amount);
+      totalSettledAmount += setAmount;
+
+      if (memberMap.has(set.payerId)) {
+        memberMap.get(set.payerId)!.settlementPaid += setAmount;
+      }
+      if (memberMap.has(set.payeeId)) {
+        memberMap.get(set.payeeId)!.settlementReceived += setAmount;
+      }
+    }
+
+    // คำนวณ Net Balance และกำหนดสถานะ
+    for (const entry of memberMap.values()) {
+      entry.totalPaid = Number(entry.totalPaid.toFixed(2));
+      entry.totalShare = Number(entry.totalShare.toFixed(2));
+      entry.settlementPaid = Number(entry.settlementPaid.toFixed(2));
+      entry.settlementReceived = Number(entry.settlementReceived.toFixed(2));
+
+      // Net = (จ่ายบิล - ส่วนแบ่งบิล) + (โอนเคลียร์เงินให้คนอื่น - ได้รับเงินโอนเคลียร์)
+      const net = (entry.totalPaid - entry.totalShare) + (entry.settlementPaid - entry.settlementReceived);
+      entry.netBalance = Number(net.toFixed(2));
+
+      if (entry.netBalance > 0.009) {
+        entry.status = 'CREDITOR';
+      } else if (entry.netBalance < -0.009) {
+        entry.status = 'DEBTOR';
+      } else {
+        entry.status = 'SETTLED';
+        entry.netBalance = 0;
+      }
+    }
+
+    // 4. Greedy Min-Cash-Flow Algorithm สำหรับหารายการโอนที่สั้นและน้อยที่สุด
+    interface DebtPerson {
+      userId: string;
+      name: string;
+      avatarUrl: string | null;
+      amount: number;
+    }
+
+    const creditors: DebtPerson[] = [];
+    const debtors: DebtPerson[] = [];
+
+    for (const entry of memberMap.values()) {
+      if (entry.netBalance > 0.009) {
+        creditors.push({
+          userId: entry.userId,
+          name: entry.name,
+          avatarUrl: entry.avatarUrl,
+          amount: entry.netBalance,
+        });
+      } else if (entry.netBalance < -0.009) {
+        debtors.push({
+          userId: entry.userId,
+          name: entry.name,
+          avatarUrl: entry.avatarUrl,
+          amount: Math.abs(entry.netBalance),
+        });
+      }
+    }
+
+    // จัดเรียงยอดมากไปน้อย
+    creditors.sort((a, b) => b.amount - a.amount);
+    debtors.sort((a, b) => b.amount - a.amount);
+
+    const suggestedTransfers: TransferSuggestion[] = [];
+
+    let cIdx = 0;
+    let dIdx = 0;
+
+    while (cIdx < creditors.length && dIdx < debtors.length) {
+      const creditor = creditors[cIdx];
+      const debtor = debtors[dIdx];
+
+      const transferAmount = Math.min(creditor.amount, debtor.amount);
+      const roundedAmount = Number(transferAmount.toFixed(2));
+
+      if (roundedAmount > 0) {
+        suggestedTransfers.push({
+          fromUserId: debtor.userId,
+          fromUserName: debtor.name,
+          fromUserAvatar: debtor.avatarUrl,
+          toUserId: creditor.userId,
+          toUserName: creditor.name,
+          toUserAvatar: creditor.avatarUrl,
+          amount: roundedAmount,
+        });
+      }
+
+      creditor.amount = Number((creditor.amount - roundedAmount).toFixed(2));
+      debtor.amount = Number((debtor.amount - roundedAmount).toFixed(2));
+
+      if (creditor.amount <= 0.009) cIdx++;
+      if (debtor.amount <= 0.009) dIdx++;
+    }
+
+      return {
+        tripId,
+        totalExpensesAmount: Number(totalExpensesAmount.toFixed(2)),
+        totalSettledAmount: Number(totalSettledAmount.toFixed(2)),
+        userBalances: Array.from(memberMap.values()),
+        suggestedTransfers,
+      };
+    } catch (err) {
+      console.error('getTripBalances error:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * แก้ไขข้อมูลบิลค่าใช้จ่าย
+   */
+  async update(tripId: string, expenseId: string, currentUserId: string, dto: UpdateExpenseDto) {
+    const trip = await this.ensureTripAndMembership(tripId, currentUserId);
+
+    const expense = await this.prisma.expense.findFirst({
+      where: { id: expenseId, tripId },
+    });
+
+    if (!expense) {
+      throw new NotFoundException(`ไม่พบรายการค่าใช้จ่าย ID: ${expenseId}`);
+    }
+
+    // ตรวจสอบสิทธิ์: ต้องเป็นผู้จ่ายเงิน หรือเป็นเจ้าของทริป
+    const isOwner = trip.members.some((m) => m.userId === currentUserId && m.role === 'OWNER');
+    const isPayer = expense.paidById === currentUserId;
+    if (!isOwner && !isPayer) {
+      throw new ForbiddenException('เฉพาะผู้จ่ายเงินหรือเจ้าของทริปเท่านั้นที่สามารถแก้ไขข้อมูลบิลนี้ได้');
+    }
+
+    const updated = await this.prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        title: dto.title !== undefined ? dto.title : expense.title,
+        category: dto.category !== undefined ? dto.category : expense.category,
+        notes: dto.notes !== undefined ? dto.notes : expense.notes,
+        receiptUrl: dto.receiptUrl !== undefined ? dto.receiptUrl : expense.receiptUrl,
+        expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : expense.expenseDate,
+      },
+      include: {
+        paidBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        items: true,
+        splits: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'แก้ไขข้อมูลค่าใช้จ่ายสำเร็จ',
+      expense: updated,
+    };
+  }
+
+  /**
+   * ลบบิลค่าใช้จ่าย (Cascade ลบ Items และ Splits ทั้งหมด)
+   */
+  async remove(tripId: string, expenseId: string, currentUserId: string) {
+    const trip = await this.ensureTripAndMembership(tripId, currentUserId);
+
+    const expense = await this.prisma.expense.findFirst({
+      where: { id: expenseId, tripId },
+    });
+
+    if (!expense) {
+      throw new NotFoundException(`ไม่พบรายการค่าใช้จ่าย ID: ${expenseId}`);
+    }
+
+    // ตรวจสอบสิทธิ์: ต้องเป็นผู้จ่ายเงิน หรือเป็นเจ้าของทริป
+    const isOwner = trip.members.some((m) => m.userId === currentUserId && m.role === 'OWNER');
+    const isPayer = expense.paidById === currentUserId;
+    if (!isOwner && !isPayer) {
+      throw new ForbiddenException('เฉพาะผู้จ่ายเงินหรือเจ้าของทริปเท่านั้นที่สามารถลบบิลนี้ได้');
+    }
+
+    await this.prisma.expense.delete({
+      where: { id: expenseId },
+    });
+
+    return {
+      message: 'ลบรายการค่าใช้จ่ายสำเร็จ',
+      deletedId: expenseId,
+    };
   }
 }

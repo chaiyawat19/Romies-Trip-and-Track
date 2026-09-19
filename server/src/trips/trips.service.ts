@@ -1,8 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { JoinTripDto } from './dto/join-trip.dto';
+import { UpdateTripDto } from './dto/update-trip.dto';
 
 @Injectable()
 export class TripsService {
@@ -31,7 +37,7 @@ export class TripsService {
   /**
    * แปลงข้อมูลจังหวัดจาก DTO (provinceIds, provinces, หรือ province) เป็น Province ID Array พร้อมรักษาลำดับ
    */
-  private async resolveProvinceIds(dto: CreateTripDto): Promise<number[]> {
+  private async resolveProvinceIds(dto: CreateTripDto | UpdateTripDto): Promise<number[]> {
     const ids: number[] = [];
 
     if (dto.provinceIds && dto.provinceIds.length > 0) {
@@ -373,6 +379,181 @@ export class TripsService {
         members: [...trip.members, newMember],
       },
       member: newMember,
+    };
+  }
+
+  /**
+   * แก้ไขข้อมูลทริป (เฉพาะ OWNER หรือ EDITOR)
+   */
+  async update(tripId: string, currentUserId: string, dto: UpdateTripDto, coverImageUrl?: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        members: true,
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`ไม่พบข้อมูลทริป ID: ${tripId}`);
+    }
+
+    const member = trip.members.find((m) => m.userId === currentUserId);
+    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+      throw new ForbiddenException(
+        'เฉพาะเจ้าของทริป (OWNER) หรือผู้ดูแล (ADMIN) เท่านั้นที่แก้ไขทริปได้',
+      );
+    }
+
+    const hasProvinceUpdate =
+      dto.provinceIds !== undefined || dto.provinces !== undefined || dto.province !== undefined;
+
+    let provinceIds: number[] = [];
+    if (hasProvinceUpdate) {
+      provinceIds = await this.resolveProvinceIds(dto);
+    }
+
+    const updatedTrip = await this.prisma.$transaction(async (tx) => {
+      if (hasProvinceUpdate) {
+        await tx.tripProvince.deleteMany({
+          where: { tripId },
+        });
+
+        if (provinceIds.length > 0) {
+          await tx.tripProvince.createMany({
+            data: provinceIds.map((pid, idx) => ({
+              tripId,
+              provinceId: pid,
+              order: idx,
+            })),
+          });
+        }
+      }
+
+      return tx.trip.update({
+        where: { id: tripId },
+        data: {
+          title: dto.title !== undefined ? dto.title : trip.title,
+          province: dto.province !== undefined ? dto.province : trip.province,
+          startDate:
+            dto.startDate !== undefined
+              ? dto.startDate
+                ? new Date(dto.startDate)
+                : null
+              : trip.startDate,
+          budgetAmount:
+            dto.budgetAmount !== undefined
+              ? dto.budgetAmount !== null
+                ? new Prisma.Decimal(dto.budgetAmount)
+                : null
+              : trip.budgetAmount,
+          budgetType: dto.budgetType !== undefined ? dto.budgetType : trip.budgetType,
+          promptPayNumber:
+            dto.promptPayNumber !== undefined ? dto.promptPayNumber : trip.promptPayNumber,
+          coverImage: coverImageUrl || (dto.coverImage !== undefined ? dto.coverImage : trip.coverImage),
+        },
+        include: {
+          provinces: {
+            include: { province: true },
+            orderBy: { order: 'asc' },
+          },
+          members: {
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, avatarUrl: true },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    return {
+      message: 'แก้ไขข้อมูลทริปสำเร็จ',
+      trip: updatedTrip,
+    };
+  }
+
+  /**
+   * นำสมาชิกออกจากทริป หรือ สมาชิกออกจากทริปด้วยตนเอง
+   */
+  async removeMember(tripId: string, currentUserId: string, targetUserId: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        members: true,
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`ไม่พบข้อมูลทริป ID: ${tripId}`);
+    }
+
+    const currentMember = trip.members.find((m) => m.userId === currentUserId);
+    if (!currentMember) {
+      throw new ForbiddenException('คุณไม่ได้เป็นสมาชิกในทริปนี้');
+    }
+
+    const targetMember = trip.members.find((m) => m.userId === targetUserId);
+    if (!targetMember) {
+      throw new NotFoundException('ไม่พบสมาชิกรายนี้ในทริป');
+    }
+
+    const isSelfLeaving = currentUserId === targetUserId;
+
+    if (isSelfLeaving) {
+      if (targetMember.role === 'OWNER') {
+        throw new BadRequestException(
+          'เจ้าของทริป (OWNER) ไม่สามารถออกจากทริปได้ หากต้องการยุติทริปกรุณาเลือกลบทริป',
+        );
+      }
+    } else {
+      if (currentMember.role !== 'OWNER') {
+        throw new ForbiddenException('เฉพาะเจ้าของทริปเท่านั้นที่สามารถลบสมาชิกออกจากทริปได้');
+      }
+      if (targetMember.role === 'OWNER') {
+        throw new BadRequestException('ไม่สามารถลบเจ้าของทริปได้');
+      }
+    }
+
+    await this.prisma.tripMember.delete({
+      where: {
+        id: targetMember.id,
+      },
+    });
+
+    return {
+      message: isSelfLeaving ? 'คุณได้ออกจากทริปเรียบร้อยแล้ว' : 'ลบสมาชิกออกจากทริปเรียบร้อยแล้ว',
+      removedUserId: targetUserId,
+    };
+  }
+
+  /**
+   * ลบทริป (เฉพาะ OWNER)
+   */
+  async remove(tripId: string, currentUserId: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        members: true,
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`ไม่พบข้อมูลทริป ID: ${tripId}`);
+    }
+
+    const isOwner = trip.members.some((m) => m.userId === currentUserId && m.role === 'OWNER');
+    if (!isOwner) {
+      throw new ForbiddenException('เฉพาะเจ้าของทริป (OWNER) เท่านั้นที่สามารถลบทริปได้');
+    }
+
+    await this.prisma.trip.delete({
+      where: { id: tripId },
+    });
+
+    return {
+      message: 'ลบทริปสำเร็จ',
+      deletedTripId: tripId,
     };
   }
 }

@@ -1,0 +1,32 @@
+meta {
+  name: Update Expense
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/trips/{{tripId}}/expenses/{{expenseId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "title": "มื้อเย็นร้านปลาเผาริมหาด (อัปเดตหมายเหตุ)",
+    "notes": "ร้านให้ส่วนลดเพิ่ม 100 บาทสำหรับสมาชิก"
+  }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  expenseId: 511668ce-2d9c-40fe-bbd4-a4f2de8a5d07
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
+}

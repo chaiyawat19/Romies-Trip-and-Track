@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -11,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
 import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
 import { CreateHybridExpenseDto } from './dto/create-hybrid-expense.dto';
+import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { ExpensesService } from './expenses.service';
 
 @Controller()
@@ -98,11 +101,50 @@ export class ExpensesController {
   }
 
   /**
+   * คำนวณสรุปยอดคงค้างและรายการโอนหนี้ (Debt Simplification)
+   * GET /trips/:tripId/expenses/balances
+   */
+  @Get('trips/:tripId/expenses/balances')
+  @UseGuards(JwtAuthGuard)
+  getBalances(@Param('tripId') tripId: string, @Req() req: any) {
+    return this.expensesService.getTripBalances(tripId, req.user.id);
+  }
+
+  /**
    * ดูรายละเอียดค่าใช้จ่ายเดี่ยว
    * GET /trips/:tripId/expenses/:id
    */
   @Get('trips/:tripId/expenses/:id')
   findOne(@Param('tripId') tripId: string, @Param('id') id: string) {
     return this.expensesService.findOne(tripId, id);
+  }
+
+  /**
+   * แก้ไขข้อมูลบิลค่าใช้จ่าย
+   * PATCH /trips/:tripId/expenses/:id
+   */
+  @Patch('trips/:tripId/expenses/:id')
+  @UseGuards(JwtAuthGuard)
+  update(
+    @Param('tripId') tripId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() dto: UpdateExpenseDto,
+  ) {
+    return this.expensesService.update(tripId, id, req.user.id, dto);
+  }
+
+  /**
+   * ลบบิลค่าใช้จ่าย
+   * DELETE /trips/:tripId/expenses/:id
+   */
+  @Delete('trips/:tripId/expenses/:id')
+  @UseGuards(JwtAuthGuard)
+  remove(
+    @Param('tripId') tripId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    return this.expensesService.remove(tripId, id, req.user.id);
   }
 }
