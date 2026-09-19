@@ -20,6 +20,11 @@ enum TripStatus {
   CANCELLED
 }
 
+enum BudgetType {
+  TOTAL
+  PER_PERSON
+}
+
 enum MemberRole {
   OWNER
   ADMIN
@@ -61,10 +66,13 @@ enum SettlementStatus {
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   email     String   @unique
-  name      String?
-  avatarUrl String?  @map("avatar_url")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  name                   String?
+  avatarUrl              String?   @map("avatar_url")
+  password               String?
+  passwordResetToken     String?   @map("password_reset_token")
+  passwordResetExpires   DateTime? @map("password_reset_expires")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   // Relations
   memberships         TripMember[]
@@ -81,20 +89,22 @@ model User {
 
 /// ทริปเที่ยว
 model Trip {
-  id          String     @id @default(uuid()) @db.Uuid
-  title       String     @db.VarChar(255)
-  description String?    @db.Text
-  destination String?    @db.VarChar(255)
-  startDate   DateTime?  @map("start_date")
-  endDate     DateTime?  @map("end_date")
-  status      TripStatus @default(PLANNING)
-  inviteCode  String     @unique @map("invite_code") @db.VarChar(64)
-  currency    String     @default("THB") @db.VarChar(10)
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
+  id              String      @id @default(uuid()) @db.Uuid
+  title           String      @db.VarChar(255)
+  province        String?     @db.VarChar(100)
+  coverImage      String?     @map("cover_image") @db.Text
+  startDate       DateTime?   @map("start_date")
+  budgetAmount    Decimal?    @map("budget_amount") @db.Decimal(12, 2)
+  budgetType      BudgetType? @map("budget_type")
+  promptPayNumber String?     @map("promptpay_number") @db.VarChar(50)
+  status          TripStatus  @default(PLANNING)
+  inviteCode      String      @unique @map("invite_code") @db.VarChar(6)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
 
   // Relations
   members        TripMember[]
+  provinces      TripProvince[]
   availabilities Availability[]
   todos          TripTodo[]
   expenses       Expense[]
@@ -102,6 +112,7 @@ model Trip {
 
   @@index([inviteCode], name: "idx_trips_invite_code")
   @@index([status], name: "idx_trips_status")
+  @@index([province], name: "idx_trips_province")
   @@map("trips")
 }
 
@@ -266,3 +277,34 @@ model Settlement {
   @@index([payerId, payeeId], name: "idx_settlements_payer_payee")
   @@map("settlements")
 }
+
+/// ข้อมูลจังหวัดในประเทศไทย (77 จังหวัด)
+model Province {
+  id     Int    @id @default(autoincrement())
+  nameTh String @unique @map("name_th") @db.VarChar(100)
+  nameEn String @unique @map("name_en") @db.VarChar(100)
+  region String @db.VarChar(50)
+
+  // Relations
+  trips TripProvince[]
+
+  @@index([region], name: "idx_provinces_region")
+  @@map("provinces")
+}
+
+/// ตารางเชื่อมทริปกับจังหวัด (รองรับทริปที่ไปได้หลายจังหวัด พร้อมลำดับการเดินทาง)
+model TripProvince {
+  id         String   @id @default(uuid()) @db.Uuid
+  tripId     String   @map("trip_id") @db.Uuid
+  provinceId Int      @map("province_id")
+  order      Int      @default(0)
+
+  trip     Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  province Province @relation(fields: [provinceId], references: [id], onDelete: Restrict)
+
+  @@unique([tripId, provinceId], name: "uk_trip_provinces_trip_province")
+  @@index([tripId], name: "idx_trip_provinces_trip_id")
+  @@index([provinceId], name: "idx_trip_provinces_province_id")
+  @@map("trip_provinces")
+}
+

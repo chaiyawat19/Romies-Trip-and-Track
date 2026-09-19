@@ -7,7 +7,11 @@ meta {
 post {
   url: {{baseUrl}}/trips
   body: json
-  auth: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
 }
 
 headers {
@@ -16,11 +20,12 @@ headers {
 
 body:json {
   {
-    "title": "ทริปเที่ยวภูเก็ต 3 วัน 2 คืน",
-    "description": "เที่ยวทะเล พักพูลวิลล่า และกินซีฟู้ด",
-    "destination": "Phuket, Thailand",
+    "title": "ทริปเที่ยวภูเก็ต-พังงา 3 วัน 2 คืน",
+    "provinces": ["ภูเก็ต", "พังงา"],
     "startDate": "2026-10-15T00:00:00.000Z",
-    "endDate": "2026-10-17T00:00:00.000Z",
-    "currency": "THB"
+    "budgetAmount": 15000,
+    "budgetType": "TOTAL",
+    "promptPayNumber": "0812345678",
+    "coverImage": "https://images.unsplash.com/photo-1589394815804-964ed0be2eb5?auto=format&fit=crop&w=800&q=80"
   }
 }

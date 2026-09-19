@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import * as bcrypt from 'bcryptjs';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const connectionString = process.env.DATABASE_URL;
 const adapter = new PrismaPg({ connectionString });
@@ -36,6 +39,7 @@ const mockUsers = [
 
 async function main() {
   console.log('🌱 Starting database seed for Users...');
+  const defaultPasswordHash = await bcrypt.hash('password123', 10);
 
   for (const user of mockUsers) {
     const upsertedUser = await prisma.user.upsert({
@@ -43,18 +47,43 @@ async function main() {
       update: {
         name: user.name,
         avatarUrl: user.avatarUrl,
+        password: defaultPasswordHash,
       },
       create: {
         email: user.email,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        password: defaultPasswordHash,
       },
     });
     console.log(`✓ User upserted: ${upsertedUser.name} (${upsertedUser.email}) [ID: ${upsertedUser.id}]`);
   }
 
   const count = await prisma.user.count();
-  console.log(`\n🎉 Seed completed successfully! Total users in database: ${count}`);
+  console.log(`\n🎉 Seed completed for users! Total users in database: ${count}`);
+
+  console.log('\n🌱 Starting database seed for 77 Provinces of Thailand...');
+  const jsonPath = path.join(__dirname, '../src/common/data/provinces.json');
+  const provincesRaw = fs.readFileSync(jsonPath, 'utf-8');
+  const provinces = JSON.parse(provincesRaw);
+
+  for (const province of provinces) {
+    await prisma.province.upsert({
+      where: { nameTh: province.nameTh },
+      update: {
+        nameEn: province.nameEn,
+        region: province.region,
+      },
+      create: {
+        nameTh: province.nameTh,
+        nameEn: province.nameEn,
+        region: province.region,
+      },
+    });
+  }
+
+  const provinceCount = await prisma.province.count();
+  console.log(`🎉 Seed completed! Total provinces in database: ${provinceCount}`);
 }
 
 main()
