@@ -1,27 +1,33 @@
 meta {
-  name: Create Expense
+  name: Create Equal Expense
   type: http
-  seq: 1
+  seq: 2
 }
 
 post {
-  url: {{baseUrl}}/expenses
+  url: {{baseUrl}}/trips/{{tripId}}/expenses/equal
   body: json
-  auth: none
+  auth: bearer
 }
 
 headers {
   Content-Type: application/json
 }
 
+auth:bearer {
+  token: {{accessToken}}
+}
+
 body:json {
   {
-    "tripId": "YOUR_TRIP_UUID_HERE",
-    "paidById": "YOUR_USER_UUID_HERE",
-    "title": "ค่าอาหารค่ำร้านริมเล",
-    "totalAmount": 3450.00,
+    "title": "มื้อเย็นร้านปลาเผาริมหาด",
+    "totalAmount": 1800,
     "category": "FOOD",
-    "splitType": "HYBRID_ITEMIZED",
-    "notes": "มีบางคนดื่มเบียร์ บางคนไม่ดื่ม"
+    "notes": "หารเท่ากันทุกคนในทริป"
   }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
 }

@@ -1,0 +1,11 @@
+meta {
+  name: Get Trip Expenses
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/trips/{{tripId}}/expenses
+  body: none
+  auth: none
+}

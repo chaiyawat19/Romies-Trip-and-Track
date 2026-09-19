@@ -9,6 +9,7 @@ import { TripsModule } from './trips/trips.module';
 import { ProvincesModule } from './provinces/provinces.module';
 import { TodosModule } from './todos/todos.module';
 import { AvailabilitiesModule } from './availabilities/availabilities.module';
+import { ExpensesModule } from './expenses/expenses.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AvailabilitiesModule } from './availabilities/availabilities.module';
     ProvincesModule,
     TodosModule,
     AvailabilitiesModule,
+    ExpensesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
