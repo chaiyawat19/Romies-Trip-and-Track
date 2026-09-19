@@ -1,0 +1,115 @@
+import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { ExpenseCategory, SplitType } from '@prisma/client';
+
+export class CreateHybridItemDto {
+  @IsString({ message: 'ชื่อรายการต้องเป็นตัวอักษร' })
+  @IsNotEmpty({ message: 'กรุณาระบุชื่อรายการ' })
+  @MaxLength(255, { message: 'ชื่อรายการต้องไม่เกิน 255 ตัวอักษร' })
+  name: string;
+
+  @IsNumber({}, { message: 'ราคาต่อหน่วยต้องเป็นตัวเลข' })
+  @Min(0, { message: 'ราคาต้องไม่ติดลบ' })
+  price: number;
+
+  @IsInt({ message: 'จำนวนต้องเป็นจำนวนเต็ม' })
+  @Min(1, { message: 'จำนวนต้องอย่างน้อย 1' })
+  @IsOptional()
+  quantity?: number = 1;
+
+  /**
+   * true = กับข้าวตรงกลาง (Shared Dish)
+   * false = จานหลักส่วนตัว (Personal Dish)
+   */
+  @IsBoolean({ message: 'isShared ต้องเป็น boolean (true/false)' })
+  @IsOptional()
+  isShared?: boolean = false;
+
+  /**
+   * ผู้รับผิดชอบในรายการนี้
+   * - กรณีจานหลักส่วนตัว (isShared = false): ระบุ User ID ของผู้ที่ทานรายการนี้
+   * - กรณีกับข้าวตรงกลาง (isShared = true):
+   *     - หากระบุ จะหารเท่าเฉพาะคนที่ระบุ
+   *     - หากไม่ระบุ จะหารเท่ากับผู้ร่วมแชร์กับข้าวตรงกลางทั้งหมด (sharedParticipantIds) หรือทุกคนในทริป
+   */
+  @IsArray({ message: 'assignedUserIds ต้องเป็น Array ของ User ID' })
+  @IsUUID('all', { each: true, message: 'User ID ของผู้รับผิดชอบไม่ถูกต้อง' })
+  @IsOptional()
+  assignedUserIds?: string[];
+}
+
+export class CreateHybridExpenseDto {
+  @IsString({ message: 'ชื่อบิล/ค่าใช้จ่ายต้องเป็นตัวอักษร' })
+  @IsNotEmpty({ message: 'กรุณาระบุชื่อบิลค่าใช้จ่าย' })
+  @MaxLength(255, { message: 'ชื่อบิลค่าใช้จ่ายต้องไม่เกิน 255 ตัวอักษร' })
+  title: string;
+
+  @IsEnum(SplitType, { message: 'ประเภทการหารต้องเป็น HYBRID' })
+  @IsOptional()
+  splitType?: SplitType = SplitType.HYBRID;
+
+  @IsEnum(ExpenseCategory, { message: 'ประเภทค่าใช้จ่ายไม่ถูกต้อง' })
+  @IsOptional()
+  category?: ExpenseCategory = ExpenseCategory.FOOD;
+
+  @IsUUID('all', { message: 'paidById ต้องเป็น UUID ที่ถูกต้อง' })
+  @IsOptional()
+  paidById?: string;
+
+  @IsDateString({}, { message: 'expenseDate ต้องเป็นรูปแบบวันที่ ISO8601' })
+  @IsOptional()
+  expenseDate?: string;
+
+  @IsString({ message: 'receiptUrl ต้องเป็นตัวอักษร' })
+  @IsOptional()
+  receiptUrl?: string;
+
+  @IsString({ message: 'notes ต้องเป็นตัวอักษร' })
+  @IsOptional()
+  notes?: string;
+
+  @IsNumber({}, { message: 'vatPercentage ต้องเป็นตัวเลข' })
+  @Min(0, { message: 'vatPercentage ต้องไม่ติดลบ' })
+  @IsOptional()
+  vatPercentage?: number;
+
+  @IsNumber({}, { message: 'serviceChargePercentage ต้องเป็นตัวเลข' })
+  @Min(0, { message: 'serviceChargePercentage ต้องไม่ติดลบ' })
+  @IsOptional()
+  serviceChargePercentage?: number;
+
+  @IsNumber({}, { message: 'discountAmount ต้องเป็นตัวเลข' })
+  @Min(0, { message: 'discountAmount ต้องไม่ติดลบ' })
+  @IsOptional()
+  discountAmount?: number;
+
+  /**
+   * รายชื่อผู้ที่ร่วมทานกับข้าวตรงกลาง (Shared Dishes)
+   * หากไม่ได้ระบุ จะถือว่าสมาชิกทุกคนในทริปทานกับข้าวตรงกลางร่วมกัน
+   */
+  @IsArray({ message: 'sharedParticipantIds ต้องเป็น Array ของ User ID' })
+  @IsUUID('all', { each: true, message: 'User ID ไม่ถูกต้อง' })
+  @IsOptional()
+  sharedParticipantIds?: string[];
+
+  @IsArray({ message: 'items ต้องเป็น Array ของรายการอาหาร/สิ่งของ' })
+  @ArrayMinSize(1, { message: 'ต้องมีรายการอาหาร/สิ่งของอย่างน้อย 1 รายการ' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateHybridItemDto)
+  items: CreateHybridItemDto[];
+}

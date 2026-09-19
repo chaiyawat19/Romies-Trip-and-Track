@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EXPENSE_CATEGORIES } from './data/expense-categories.data';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
 import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
+import { CreateHybridExpenseDto } from './dto/create-hybrid-expense.dto';
 
 @Injectable()
 export class ExpensesService {
@@ -443,6 +444,369 @@ export class ExpensesService {
         vatPercentage,
         vatAmount,
         totalAmount,
+        userBreakdown: Array.from(userSummaryMap.values()),
+      },
+      expense: result,
+    };
+  }
+
+  /**
+   * 3. หารส่วนกลาง + แยกจ่ายส่วนตัว (Hybrid / Shared Dishes)
+   * แยกจานหลักส่วนตัวของแต่ละคน และกับข้าวตรงกลางหารเท่ากันเฉพาะคนที่ร่วมทาน
+   * พร้อมเฉลี่ยส่วนลด, Service Charge และ VAT ตามสัดส่วน
+   */
+  async createHybridSplit(tripId: string, currentUserId: string, dto: CreateHybridExpenseDto) {
+    const trip = await this.ensureTripAndMembership(tripId, currentUserId);
+
+    const paidById = dto.paidById || currentUserId;
+    const tripMemberMap = new Map(trip.members.map((m) => [m.userId, m.user]));
+    if (!tripMemberMap.has(paidById)) {
+      throw new BadRequestException('ผู้จ่ายเงิน (paidById) ต้องเป็นสมาชิกในทริปนี้');
+    }
+
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('ต้องระบุรายการอาหาร/สิ่งของอย่างน้อย 1 รายการ');
+    }
+
+    // กำหนดรายชื่อผู้ร่วมแชร์กับข้าวตรงกลางเริ่มต้น (Default: ทุกคนในทริป)
+    let defaultSharedUserIds = trip.members.map((m) => m.userId);
+    if (dto.sharedParticipantIds && dto.sharedParticipantIds.length > 0) {
+      for (const uid of dto.sharedParticipantIds) {
+        if (!tripMemberMap.has(uid)) {
+          throw new BadRequestException(
+            `ผู้ใช้ ID: ${uid} ใน sharedParticipantIds ไม่ได้เป็นสมาชิกในทริปนี้`,
+          );
+        }
+      }
+      defaultSharedUserIds = dto.sharedParticipantIds;
+    }
+
+    // ประมวลผลและตรวจสอบแต่ละ item
+    const itemsProcessed = dto.items.map((item, index) => {
+      const isShared = Boolean(item.isShared);
+      let assignedUserIds: string[] = [];
+
+      if (isShared) {
+        // กับข้าวตรงกลาง: หากระบุคนให้หารตามนั้น หากไม่ระบุให้ดึงผู้ร่วมแชร์ส่วนกลางทั้งหมด
+        if (item.assignedUserIds && item.assignedUserIds.length > 0) {
+          for (const uid of item.assignedUserIds) {
+            if (!tripMemberMap.has(uid)) {
+              throw new BadRequestException(
+                `ผู้ใช้ ID: ${uid} ในรายการ "${item.name}" ไม่ได้เป็นสมาชิกในทริปนี้`,
+              );
+            }
+          }
+          assignedUserIds = item.assignedUserIds;
+        } else {
+          assignedUserIds = defaultSharedUserIds;
+        }
+      } else {
+        // จานหลักส่วนตัว: ต้องระบุผู้ทานอย่างน้อย 1 คน
+        if (!item.assignedUserIds || item.assignedUserIds.length === 0) {
+          throw new BadRequestException(
+            `รายการ "${item.name}" เป็นจานหลักส่วนตัว กรุณาระบุผู้รับผิดชอบอย่างน้อย 1 คน`,
+          );
+        }
+        for (const uid of item.assignedUserIds) {
+          if (!tripMemberMap.has(uid)) {
+            throw new BadRequestException(
+              `ผู้ใช้ ID: ${uid} ในรายการ "${item.name}" ไม่ได้เป็นสมาชิกในทริปนี้`,
+            );
+          }
+        }
+        assignedUserIds = item.assignedUserIds;
+      }
+
+      const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
+      const price = Number(item.price);
+      const itemSubtotal = Number((price * quantity).toFixed(2));
+
+      return {
+        ...item,
+        quantity,
+        price,
+        itemSubtotal,
+        isShared,
+        assignedUserIds,
+        order: index,
+      };
+    });
+
+    // 1. คำนวณ Subtotals
+    const sharedSubtotal = Number(
+      itemsProcessed
+        .filter((it) => it.isShared)
+        .reduce((sum, it) => sum + it.itemSubtotal, 0)
+        .toFixed(2),
+    );
+
+    const personalSubtotal = Number(
+      itemsProcessed
+        .filter((it) => !it.isShared)
+        .reduce((sum, it) => sum + it.itemSubtotal, 0)
+        .toFixed(2),
+    );
+
+    const subtotalAmount = Number((sharedSubtotal + personalSubtotal).toFixed(2));
+
+    if (subtotalAmount <= 0) {
+      throw new BadRequestException('ยอดรวมราคาสินค้าต้องมากกว่า 0');
+    }
+
+    // 2. คำนวณส่วนลด, Service Charge, และ VAT
+    const discountAmount = dto.discountAmount
+      ? Math.min(subtotalAmount, Number(dto.discountAmount))
+      : 0;
+    const discountedSubtotal = Math.max(0, subtotalAmount - discountAmount);
+
+    const serviceChargePercentage = dto.serviceChargePercentage
+      ? Number(dto.serviceChargePercentage)
+      : 0;
+    const serviceChargeAmount = Number(
+      ((discountedSubtotal * serviceChargePercentage) / 100).toFixed(2),
+    );
+
+    const vatPercentage = dto.vatPercentage ? Number(dto.vatPercentage) : 0;
+    const vatBase = discountedSubtotal + serviceChargeAmount;
+    const vatAmount = Number(((vatBase * vatPercentage) / 100).toFixed(2));
+
+    const totalAmount = Number((vatBase + vatAmount).toFixed(2));
+
+    // 3. Prorate Factor
+    const prorateFactor = subtotalAmount > 0 ? totalAmount / subtotalAmount : 1;
+
+    // เตรียม split targets
+    interface SplitTarget {
+      itemIndex: number;
+      userId: string;
+      isShared: boolean;
+      rawPortion: number;
+      exactAmount: number;
+      floorAmount: number;
+      remainder: number;
+      finalAmount: number;
+    }
+
+    const splitTargets: SplitTarget[] = [];
+
+    itemsProcessed.forEach((it, idx) => {
+      const numUsers = it.assignedUserIds.length;
+      const rawPortion = it.itemSubtotal / numUsers;
+      const exactAmount = (it.itemSubtotal * prorateFactor) / numUsers;
+      const floorAmount = Math.floor(exactAmount * 100) / 100;
+      const remainder = exactAmount - floorAmount;
+
+      for (const uid of it.assignedUserIds) {
+        splitTargets.push({
+          itemIndex: idx,
+          userId: uid,
+          isShared: it.isShared,
+          rawPortion,
+          exactAmount,
+          floorAmount,
+          remainder,
+          finalAmount: floorAmount,
+        });
+      }
+    });
+
+    // แจกจ่ายเศษสตางค์ (Largest Remainder Method)
+    const currentSum = splitTargets.reduce((sum, s) => sum + s.floorAmount, 0);
+    let centsToDistribute = Math.round((totalAmount - currentSum) * 100);
+
+    const sortedIndices = splitTargets
+      .map((item, index) => ({ index, remainder: item.remainder }))
+      .sort((a, b) => b.remainder - a.remainder);
+
+    let distIdx = 0;
+    while (centsToDistribute > 0 && distIdx < sortedIndices.length) {
+      const targetIdx = sortedIndices[distIdx].index;
+      splitTargets[targetIdx].finalAmount = Number(
+        (splitTargets[targetIdx].finalAmount + 0.01).toFixed(2),
+      );
+      centsToDistribute--;
+      distIdx++;
+    }
+
+    // 4. บันทึกลง Database ด้วย Transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.create({
+        data: {
+          tripId,
+          paidById,
+          title: dto.title,
+          totalAmount: new Prisma.Decimal(totalAmount),
+          subtotalAmount: new Prisma.Decimal(subtotalAmount),
+          discountAmount: new Prisma.Decimal(discountAmount),
+          serviceChargePercentage: new Prisma.Decimal(serviceChargePercentage),
+          serviceChargeAmount: new Prisma.Decimal(serviceChargeAmount),
+          vatPercentage: new Prisma.Decimal(vatPercentage),
+          vatAmount: new Prisma.Decimal(vatAmount),
+          category: dto.category || 'FOOD',
+          splitType: 'HYBRID',
+          expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
+          receiptUrl: dto.receiptUrl || null,
+          notes: dto.notes || null,
+        },
+      });
+
+      for (let idx = 0; idx < itemsProcessed.length; idx++) {
+        const it = itemsProcessed[idx];
+        const createdItem = await tx.expenseItem.create({
+          data: {
+            expenseId: expense.id,
+            name: it.name,
+            price: new Prisma.Decimal(it.price),
+            quantity: it.quantity,
+            amount: new Prisma.Decimal(it.itemSubtotal),
+            isShared: it.isShared,
+            order: it.order,
+          },
+        });
+
+        const itemSplits = splitTargets.filter((s) => s.itemIndex === idx);
+        for (const s of itemSplits) {
+          await tx.expenseSplit.create({
+            data: {
+              expenseId: expense.id,
+              itemId: createdItem.id,
+              userId: s.userId,
+              amount: new Prisma.Decimal(s.finalAmount),
+              isSettled: false,
+            },
+          });
+        }
+      }
+
+      return tx.expense.findUnique({
+        where: { id: expense.id },
+        include: {
+          paidBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+          items: {
+            orderBy: { order: 'asc' },
+            include: {
+              splits: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          splits: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    // 5. สรุป User Breakdown เพื่อให้ Mobile/Web แสดงผลแบ่งส่วนกลาง vs ส่วนตัวได้ชัดเจน
+    const userSummaryMap = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        avatarUrl: string | null;
+        personalSubtotal: number;
+        sharedPortionSubtotal: number;
+        rawSubtotal: number;
+        finalTotal: number;
+        personalDishes: Array<{ itemName: string; price: number; quantity: number; amount: number }>;
+        sharedDishes: Array<{ itemName: string; totalAmount: number; participantCount: number; myShare: number }>;
+      }
+    >();
+
+    for (const target of splitTargets) {
+      const it = itemsProcessed[target.itemIndex];
+      const user = tripMemberMap.get(target.userId)!;
+
+      if (!userSummaryMap.has(target.userId)) {
+        userSummaryMap.set(target.userId, {
+          userId: target.userId,
+          name: user.name || user.email || 'สมาชิกในทริป',
+          avatarUrl: user.avatarUrl,
+          personalSubtotal: 0,
+          sharedPortionSubtotal: 0,
+          rawSubtotal: 0,
+          finalTotal: 0,
+          personalDishes: [],
+          sharedDishes: [],
+        });
+      }
+
+      const entry = userSummaryMap.get(target.userId)!;
+      entry.rawSubtotal = Number((entry.rawSubtotal + target.rawPortion).toFixed(2));
+      entry.finalTotal = Number((entry.finalTotal + target.finalAmount).toFixed(2));
+
+      if (it.isShared) {
+        entry.sharedPortionSubtotal = Number(
+          (entry.sharedPortionSubtotal + target.rawPortion).toFixed(2),
+        );
+        entry.sharedDishes.push({
+          itemName: it.name,
+          totalAmount: it.itemSubtotal,
+          participantCount: it.assignedUserIds.length,
+          myShare: Number(target.rawPortion.toFixed(2)),
+        });
+      } else {
+        entry.personalSubtotal = Number(
+          (entry.personalSubtotal + target.rawPortion).toFixed(2),
+        );
+        entry.personalDishes.push({
+          itemName: it.name,
+          price: it.price,
+          quantity: it.quantity,
+          amount: it.itemSubtotal,
+        });
+      }
+    }
+
+    const sharedDishesOverview = itemsProcessed
+      .filter((it) => it.isShared)
+      .map((it) => ({
+        name: it.name,
+        price: it.price,
+        quantity: it.quantity,
+        totalAmount: it.itemSubtotal,
+        participantsCount: it.assignedUserIds.length,
+      }));
+
+    return {
+      message: 'บันทึกค่าใช้จ่ายแบบหารส่วนกลาง + แยกจ่ายส่วนตัว (Hybrid Split) สำเร็จ',
+      splitSummary: {
+        splitType: 'HYBRID',
+        subtotalAmount,
+        sharedSubtotal,
+        personalSubtotal,
+        discountAmount,
+        serviceChargePercentage,
+        serviceChargeAmount,
+        vatPercentage,
+        vatAmount,
+        totalAmount,
+        sharedDishesCount: sharedDishesOverview.length,
+        personalDishesCount: itemsProcessed.length - sharedDishesOverview.length,
+        sharedDishesOverview,
         userBreakdown: Array.from(userSummaryMap.values()),
       },
       expense: result,

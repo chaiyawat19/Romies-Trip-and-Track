@@ -1,0 +1,83 @@
+meta {
+  name: Create Hybrid Expense
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/expenses/hybrid
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "title": "มื้อค่ำร้านอาหารริมผา (แชร์กับข้าวตรงกลาง + แยกจานหลัก)",
+    "category": "FOOD",
+    "splitType": "HYBRID",
+    "vatPercentage": 7,
+    "serviceChargePercentage": 10,
+    "discountAmount": 100,
+    "notes": "กับข้าวตรงกลางแชร์ 3 คน ส่วนจานหลักแยกตามที่แต่ละคนสั่ง พร้อมเฉลี่ย Service 10% และ VAT 7%",
+    "items": [
+      {
+        "name": "ปลากะพงทอดน้ำปลา",
+        "price": 450,
+        "quantity": 1,
+        "isShared": true
+      },
+      {
+        "name": "ต้มยำกุ้งน้ำข้น",
+        "price": 300,
+        "quantity": 1,
+        "isShared": true
+      },
+      {
+        "name": "ข้าวสวยโถใหญ่",
+        "price": 80,
+        "quantity": 1,
+        "isShared": true
+      },
+      {
+        "name": "สเต็กปลาแซลมอน (ของอเล็กซ์)",
+        "price": 320,
+        "quantity": 1,
+        "isShared": false,
+        "assignedUserIds": [
+          "bde50eca-dd23-41bc-9309-ddda2a03ffb1"
+        ]
+      },
+      {
+        "name": "สปาเก็ตตี้คาโบนาร่า (ของณิชา)",
+        "price": 220,
+        "quantity": 1,
+        "isShared": false,
+        "assignedUserIds": [
+          "b4008b48-a655-4ee0-95a3-8c28eb1551d9"
+        ]
+      },
+      {
+        "name": "สเต็กเนื้อริบอาย (ของสมชาย)",
+        "price": 450,
+        "quantity": 1,
+        "isShared": false,
+        "assignedUserIds": [
+          "7a247417-6cb2-475c-95f7-a60334ab6464"
+        ]
+      }
+    ]
+  }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
+}

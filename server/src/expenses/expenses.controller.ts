@@ -10,6 +10,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
 import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
+import { CreateHybridExpenseDto } from './dto/create-hybrid-expense.dto';
 import { ExpensesService } from './expenses.service';
 
 @Controller()
@@ -54,7 +55,21 @@ export class ExpensesController {
   }
 
   /**
-   * สร้างค่าใช้จ่ายทั่วไป (Routing ตาม splitType: EQUAL | ITEMIZED)
+   * 3. หารส่วนกลาง + แยกจ่ายส่วนตัว (Hybrid / Shared Dishes)
+   * POST /trips/:tripId/expenses/hybrid
+   */
+  @Post('trips/:tripId/expenses/hybrid')
+  @UseGuards(JwtAuthGuard)
+  createHybridSplit(
+    @Param('tripId') tripId: string,
+    @Req() req: any,
+    @Body() dto: CreateHybridExpenseDto,
+  ) {
+    return this.expensesService.createHybridSplit(tripId, req.user.id, dto);
+  }
+
+  /**
+   * สร้างค่าใช้จ่ายทั่วไป (Routing ตาม splitType: EQUAL | ITEMIZED | HYBRID)
    * POST /trips/:tripId/expenses
    */
   @Post('trips/:tripId/expenses')
@@ -64,6 +79,9 @@ export class ExpensesController {
     @Req() req: any,
     @Body() dto: any,
   ) {
+    if (dto.splitType === 'HYBRID') {
+      return this.expensesService.createHybridSplit(tripId, req.user.id, dto as CreateHybridExpenseDto);
+    }
     if (dto.splitType === 'ITEMIZED') {
       return this.expensesService.createItemizedSplit(tripId, req.user.id, dto as CreateItemizedExpenseDto);
     }
