@@ -27,6 +27,10 @@ Thumbs.db
 *.launch
 .settings/
 *.sublime-workspace
+.claude/
+.windsurf/
+.agents/
+skills-lock.json
 
 # IDE - VSCode
 .vscode/*
@@ -40,3 +44,5 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+/generated/prisma
