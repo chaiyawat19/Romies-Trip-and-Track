@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EXPENSE_CATEGORIES } from './data/expense-categories.data';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
+import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
 
 @Injectable()
 export class ExpensesService {
@@ -170,6 +171,285 @@ export class ExpensesService {
   }
 
   /**
+   * 2. จ่ายตามที่กินจริง (Itemized / Individual Split)
+   * แต่ละคนสั่งอะไร กินอะไร ก็จ่ายตามนั้น พร้อมเฉลี่ย VAT และ Service Charge ตามสัดส่วน
+   */
+  async createItemizedSplit(tripId: string, currentUserId: string, dto: CreateItemizedExpenseDto) {
+    const trip = await this.ensureTripAndMembership(tripId, currentUserId);
+
+    const paidById = dto.paidById || currentUserId;
+    const tripMemberMap = new Map(trip.members.map((m) => [m.userId, m.user]));
+    if (!tripMemberMap.has(paidById)) {
+      throw new BadRequestException('ผู้จ่ายเงิน (paidById) ต้องเป็นสมาชิกในทริปนี้');
+    }
+
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('ต้องระบุรายการอาหาร/สิ่งของอย่างน้อย 1 รายการ');
+    }
+
+    // ตรวจสอบ assignedUserIds ของทุก item ว่าเป็นสมาชิกในทริปหรือไม่
+    for (const item of dto.items) {
+      if (!item.assignedUserIds || item.assignedUserIds.length === 0) {
+        throw new BadRequestException(`รายการ "${item.name}" ต้องระบุผู้รับผิดชอบอย่างน้อย 1 คน`);
+      }
+      for (const uid of item.assignedUserIds) {
+        if (!tripMemberMap.has(uid)) {
+          throw new BadRequestException(
+            `ผู้ใช้ ID: ${uid} ในรายการ "${item.name}" ไม่ได้เป็นสมาชิกในทริปนี้`,
+          );
+        }
+      }
+    }
+
+    // 1. คำนวณ Subtotal รวม
+    const itemsCalculated = dto.items.map((item, index) => {
+      const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
+      const price = Number(item.price);
+      const itemSubtotal = Number((price * quantity).toFixed(2));
+      return {
+        ...item,
+        quantity,
+        price,
+        itemSubtotal,
+        order: index,
+        isShared: item.assignedUserIds.length > 1,
+      };
+    });
+
+    const subtotalAmount = Number(
+      itemsCalculated.reduce((sum, it) => sum + it.itemSubtotal, 0).toFixed(2),
+    );
+
+    if (subtotalAmount <= 0) {
+      throw new BadRequestException('ยอดรวมราคาสินค้าต้องมากกว่า 0');
+    }
+
+    // 2. คำนวณส่วนลด, Service Charge, และ VAT
+    const discountAmount = dto.discountAmount
+      ? Math.min(subtotalAmount, Number(dto.discountAmount))
+      : 0;
+    const discountedSubtotal = Math.max(0, subtotalAmount - discountAmount);
+
+    const serviceChargePercentage = dto.serviceChargePercentage
+      ? Number(dto.serviceChargePercentage)
+      : 0;
+    const serviceChargeAmount = Number(
+      ((discountedSubtotal * serviceChargePercentage) / 100).toFixed(2),
+    );
+
+    const vatPercentage = dto.vatPercentage ? Number(dto.vatPercentage) : 0;
+    const vatBase = discountedSubtotal + serviceChargeAmount;
+    const vatAmount = Number(((vatBase * vatPercentage) / 100).toFixed(2));
+
+    const totalAmount = Number((vatBase + vatAmount).toFixed(2));
+
+    // 3. Prorate Factor: ตัวคูณสำหรับกระจายส่วนลด + Service Charge + VAT ไปยังแต่ละรายการ
+    const prorateFactor = subtotalAmount > 0 ? totalAmount / subtotalAmount : 1;
+
+    // เตรียม split entries สำหรับแต่ละ item
+    interface SplitTarget {
+      itemIndex: number;
+      userId: string;
+      rawPortion: number;
+      exactAmount: number;
+      floorAmount: number;
+      remainder: number;
+      finalAmount: number;
+    }
+
+    const splitTargets: SplitTarget[] = [];
+
+    itemsCalculated.forEach((it, idx) => {
+      const numUsers = it.assignedUserIds.length;
+      const rawPortion = it.itemSubtotal / numUsers;
+      const exactAmount = (it.itemSubtotal * prorateFactor) / numUsers;
+      const floorAmount = Math.floor(exactAmount * 100) / 100;
+      const remainder = exactAmount - floorAmount;
+
+      for (const uid of it.assignedUserIds) {
+        splitTargets.push({
+          itemIndex: idx,
+          userId: uid,
+          rawPortion,
+          exactAmount,
+          floorAmount,
+          remainder,
+          finalAmount: floorAmount,
+        });
+      }
+    });
+
+    // แจกจ่ายเศษสตางค์ (Remaining Cents) ด้วย Largest Remainder Method
+    const currentSum = splitTargets.reduce((sum, s) => sum + s.floorAmount, 0);
+    let centsToDistribute = Math.round((totalAmount - currentSum) * 100);
+
+    const sortedIndices = splitTargets
+      .map((item, index) => ({ index, remainder: item.remainder }))
+      .sort((a, b) => b.remainder - a.remainder);
+
+    let distIdx = 0;
+    while (centsToDistribute > 0 && distIdx < sortedIndices.length) {
+      const targetIdx = sortedIndices[distIdx].index;
+      splitTargets[targetIdx].finalAmount = Number(
+        (splitTargets[targetIdx].finalAmount + 0.01).toFixed(2),
+      );
+      centsToDistribute--;
+      distIdx++;
+    }
+
+    // 4. บันทึกลง Database ด้วย Transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.create({
+        data: {
+          tripId,
+          paidById,
+          title: dto.title,
+          totalAmount: new Prisma.Decimal(totalAmount),
+          subtotalAmount: new Prisma.Decimal(subtotalAmount),
+          discountAmount: new Prisma.Decimal(discountAmount),
+          serviceChargePercentage: new Prisma.Decimal(serviceChargePercentage),
+          serviceChargeAmount: new Prisma.Decimal(serviceChargeAmount),
+          vatPercentage: new Prisma.Decimal(vatPercentage),
+          vatAmount: new Prisma.Decimal(vatAmount),
+          category: dto.category || 'FOOD',
+          splitType: 'ITEMIZED',
+          expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
+          receiptUrl: dto.receiptUrl || null,
+          notes: dto.notes || null,
+        },
+      });
+
+      // บันทึกแต่ละ item
+      for (let idx = 0; idx < itemsCalculated.length; idx++) {
+        const it = itemsCalculated[idx];
+        const createdItem = await tx.expenseItem.create({
+          data: {
+            expenseId: expense.id,
+            name: it.name,
+            price: new Prisma.Decimal(it.price),
+            quantity: it.quantity,
+            amount: new Prisma.Decimal(it.itemSubtotal),
+            isShared: it.isShared,
+            order: it.order,
+          },
+        });
+
+        // สร้าง splits ที่ผูกกับ itemId นี้
+        const itemSplits = splitTargets.filter((s) => s.itemIndex === idx);
+        for (const s of itemSplits) {
+          await tx.expenseSplit.create({
+            data: {
+              expenseId: expense.id,
+              itemId: createdItem.id,
+              userId: s.userId,
+              amount: new Prisma.Decimal(s.finalAmount),
+              isSettled: false,
+            },
+          });
+        }
+      }
+
+      // ดึงข้อมูลสมบูรณ์กลับมาแสดง
+      return tx.expense.findUnique({
+        where: { id: expense.id },
+        include: {
+          paidBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+          items: {
+            orderBy: { order: 'asc' },
+            include: {
+              splits: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          splits: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    // สร้าง User Breakdown Summary เพื่อให้ Client / Mobile อ่านง่าย
+    const userSummaryMap = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        avatarUrl: string | null;
+        rawSubtotal: number;
+        finalTotal: number;
+        items: Array<{ itemName: string; rawPrice: number; portionPrice: number; finalAmount: number }>;
+      }
+    >();
+
+    for (const target of splitTargets) {
+      const it = itemsCalculated[target.itemIndex];
+      const user = tripMemberMap.get(target.userId)!;
+
+      if (!userSummaryMap.has(target.userId)) {
+        userSummaryMap.set(target.userId, {
+          userId: target.userId,
+          name: user.name || user.email || 'สมาชิกในทริป',
+          avatarUrl: user.avatarUrl,
+          rawSubtotal: 0,
+          finalTotal: 0,
+          items: [],
+        });
+      }
+
+      const entry = userSummaryMap.get(target.userId)!;
+      entry.rawSubtotal = Number((entry.rawSubtotal + target.rawPortion).toFixed(2));
+      entry.finalTotal = Number((entry.finalTotal + target.finalAmount).toFixed(2));
+      entry.items.push({
+        itemName: it.name,
+        rawPrice: it.itemSubtotal,
+        portionPrice: Number(target.rawPortion.toFixed(2)),
+        finalAmount: target.finalAmount,
+      });
+    }
+
+    return {
+      message: 'บันทึกค่าใช้จ่ายแบบจ่ายตามที่กินจริง (Itemized Split) สำเร็จ',
+      splitSummary: {
+        splitType: 'ITEMIZED',
+        itemCount: itemsCalculated.length,
+        subtotalAmount,
+        discountAmount,
+        serviceChargePercentage,
+        serviceChargeAmount,
+        vatPercentage,
+        vatAmount,
+        totalAmount,
+        userBreakdown: Array.from(userSummaryMap.values()),
+      },
+      expense: result,
+    };
+  }
+
+  /**
    * ดึงรายการค่าใช้จ่ายทั้งหมดในทริป
    */
   async findAll(tripId: string) {
@@ -199,7 +479,22 @@ export class ExpensesService {
             },
           },
         },
-        items: true,
+        items: {
+          orderBy: { order: 'asc' },
+          include: {
+            splits: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -242,7 +537,22 @@ export class ExpensesService {
             },
           },
         },
-        items: true,
+        items: {
+          orderBy: { order: 'asc' },
+          include: {
+            splits: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 

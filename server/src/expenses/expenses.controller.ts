@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateEqualExpenseDto } from './dto/create-equal-expense.dto';
+import { CreateItemizedExpenseDto } from './dto/create-itemized-expense.dto';
 import { ExpensesService } from './expenses.service';
 
 @Controller()
@@ -39,7 +40,21 @@ export class ExpensesController {
   }
 
   /**
-   * สร้างค่าใช้จ่ายทั่วไป (Default: Equal Split)
+   * 2. จ่ายตามที่กินจริง (Itemized / Individual Split)
+   * POST /trips/:tripId/expenses/itemized
+   */
+  @Post('trips/:tripId/expenses/itemized')
+  @UseGuards(JwtAuthGuard)
+  createItemizedSplit(
+    @Param('tripId') tripId: string,
+    @Req() req: any,
+    @Body() dto: CreateItemizedExpenseDto,
+  ) {
+    return this.expensesService.createItemizedSplit(tripId, req.user.id, dto);
+  }
+
+  /**
+   * สร้างค่าใช้จ่ายทั่วไป (Routing ตาม splitType: EQUAL | ITEMIZED)
    * POST /trips/:tripId/expenses
    */
   @Post('trips/:tripId/expenses')
@@ -47,9 +62,12 @@ export class ExpensesController {
   createExpense(
     @Param('tripId') tripId: string,
     @Req() req: any,
-    @Body() dto: CreateEqualExpenseDto,
+    @Body() dto: any,
   ) {
-    return this.expensesService.createEqualSplit(tripId, req.user.id, dto);
+    if (dto.splitType === 'ITEMIZED') {
+      return this.expensesService.createItemizedSplit(tripId, req.user.id, dto as CreateItemizedExpenseDto);
+    }
+    return this.expensesService.createEqualSplit(tripId, req.user.id, dto as CreateEqualExpenseDto);
   }
 
   /**

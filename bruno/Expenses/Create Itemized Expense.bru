@@ -1,0 +1,75 @@
+meta {
+  name: Create Itemized Expense
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/expenses/itemized
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "title": "มื้อกลางวันร้านซีฟู้ดริมทะเล",
+    "category": "FOOD",
+    "splitType": "ITEMIZED",
+    "vatPercentage": 7,
+    "serviceChargePercentage": 10,
+    "discountAmount": 50,
+    "notes": "จ่ายตามจริงที่แต่ละคนสั่ง พร้อมเฉลี่ย Service 10% และ VAT 7% และหักส่วนลดคูปอง 50 บาท",
+    "items": [
+      {
+        "name": "กุ้งแม่น้ำเผา (จานใหญ่)",
+        "price": 800,
+        "quantity": 1,
+        "assignedUserIds": [
+          "7a247417-6cb2-475c-95f7-a60334ab6464",
+          "bde50eca-dd23-41bc-9309-ddda2a03ffb1"
+        ]
+      },
+      {
+        "name": "ต้มยำโป๊ะแตกทะเล",
+        "price": 350,
+        "quantity": 1,
+        "assignedUserIds": [
+          "7a247417-6cb2-475c-95f7-a60334ab6464",
+          "b4008b48-a655-4ee0-95a3-8c28eb1551d9",
+          "bde50eca-dd23-41bc-9309-ddda2a03ffb1"
+        ]
+      },
+      {
+        "name": "ข้าวผัดปู (จานเดียวของณิชา)",
+        "price": 120,
+        "quantity": 1,
+        "assignedUserIds": [
+          "b4008b48-a655-4ee0-95a3-8c28eb1551d9"
+        ]
+      },
+      {
+        "name": "น้ำมะพร้าวปั่น",
+        "price": 60,
+        "quantity": 3,
+        "assignedUserIds": [
+          "7a247417-6cb2-475c-95f7-a60334ab6464",
+          "b4008b48-a655-4ee0-95a3-8c28eb1551d9",
+          "bde50eca-dd23-41bc-9309-ddda2a03ffb1"
+        ]
+      }
+    ]
+  }
+}
+
+vars:pre-request {
+  tripId: 9bc580f1-9c0c-4353-bdf3-82344c1c876b
+  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZGU1MGVjYS1kZDIzLTQxYmMtOTMwOS1kZGRhMmEwM2ZmYjEiLCJlbWFpbCI6ImFsZXhAcm9hbWllcy5hcHAiLCJpYXQiOjE3ODk4MTY2NjksImV4cCI6MTc5MDQyMTQ2OX0.rEKi-ZOZWzolcRuloDnPNqOf-wJR9XyTylqqh4x7sj8
+}
