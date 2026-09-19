@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { TripsModule } from './trips/trips.module';
 import { ProvincesModule } from './provinces/provinces.module';
+import { TodosModule } from './todos/todos.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ProvincesModule } from './provinces/provinces.module';
     AuthModule,
     TripsModule,
     ProvincesModule,
+    TodosModule,
   ],
   controllers: [AppController],
   providers: [AppService],

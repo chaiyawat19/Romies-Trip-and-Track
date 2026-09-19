@@ -1,0 +1,15 @@
+meta {
+  name: Delete Todo
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/trips/{{tripId}}/todos/{{todoId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

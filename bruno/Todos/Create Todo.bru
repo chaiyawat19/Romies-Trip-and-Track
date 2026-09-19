@@ -1,0 +1,27 @@
+meta {
+  name: Create Todo
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/todos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "title": "ซื้อของสดทำหมูกระทะริมหาด",
+    "description": "แวะตลาดสดก่อน 5 โมงเย็น งบกองกลาง 500 บาท",
+    "sticker": "eating"
+  }
+}
