@@ -1,0 +1,26 @@
+meta {
+  name: Create Trip
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/trips
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "title": "ทริปเที่ยวภูเก็ต 3 วัน 2 คืน",
+    "description": "เที่ยวทะเล พักพูลวิลล่า และกินซีฟู้ด",
+    "destination": "Phuket, Thailand",
+    "startDate": "2026-10-15T00:00:00.000Z",
+    "endDate": "2026-10-17T00:00:00.000Z",
+    "currency": "THB"
+  }
+}

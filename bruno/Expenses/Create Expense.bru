@@ -1,0 +1,27 @@
+meta {
+  name: Create Expense
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/expenses
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "tripId": "YOUR_TRIP_UUID_HERE",
+    "paidById": "YOUR_USER_UUID_HERE",
+    "title": "ค่าอาหารค่ำร้านริมเล",
+    "totalAmount": 3450.00,
+    "category": "FOOD",
+    "splitType": "HYBRID_ITEMIZED",
+    "notes": "มีบางคนดื่มเบียร์ บางคนไม่ดื่ม"
+  }
+}
