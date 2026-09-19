@@ -1,0 +1,25 @@
+meta {
+  name: Join Trip via QR URL
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/trips/invite/{{inviteCode}}/join
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "nickname": "เพื่อนสแกน QR"
+  }
+}

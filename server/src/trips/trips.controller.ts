@@ -15,6 +15,7 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateTripDto } from './dto/create-trip.dto';
+import { JoinTripDto } from './dto/join-trip.dto';
 import { TripsService } from './trips.service';
 
 const multerConfig = {
@@ -77,5 +78,32 @@ export class TripsController {
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.tripsService.findOne(id);
+  }
+
+  /**
+   * เข้าร่วมทริปด้วยรหัสเชิญ 6 หลัก หรือ Trip ID
+   * POST /trips/join
+   */
+  @Post('join')
+  @UseGuards(JwtAuthGuard)
+  async join(@Req() req: any, @Body() dto: JoinTripDto) {
+    return this.tripsService.join(req.user.id, dto);
+  }
+
+  /**
+   * เข้าร่วมทริปโดยตรงจากรหัสเชิญที่แนบมากับ URL (เหมาะสำหรับสแกน QR Code)
+   * POST /trips/invite/:code/join
+   */
+  @Post('invite/:code/join')
+  @UseGuards(JwtAuthGuard)
+  async joinByCode(
+    @Req() req: any,
+    @Param('code') code: string,
+    @Body() dto?: Partial<JoinTripDto>,
+  ) {
+    return this.tripsService.join(req.user.id, {
+      ...dto,
+      inviteCode: code,
+    });
   }
 }

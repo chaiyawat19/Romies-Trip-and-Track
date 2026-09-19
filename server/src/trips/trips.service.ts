@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTripDto } from './dto/create-trip.dto';
+import { JoinTripDto } from './dto/join-trip.dto';
 
 @Injectable()
 export class TripsService {
@@ -281,5 +282,97 @@ export class TripsService {
     }
 
     return trip;
+  }
+
+  /**
+   * เข้าร่วมทริปด้วยรหัสเชิญ (Invite Code) หรือ Trip ID
+   */
+  async join(userId: string, dto: JoinTripDto) {
+    if (!dto.inviteCode && !dto.tripId) {
+      throw new BadRequestException('กรุณาระบุรหัสเชิญ (inviteCode) หรือรหัสทริป (tripId)');
+    }
+
+    const whereCondition = dto.inviteCode
+      ? { inviteCode: dto.inviteCode }
+      : { id: dto.tripId };
+
+    const trip = await this.prisma.trip.findUnique({
+      where: whereCondition,
+      include: {
+        provinces: {
+          include: {
+            province: true,
+          },
+          orderBy: {
+            order: 'asc',
+          },
+        },
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(
+        dto.inviteCode
+          ? `ไม่พบทริปที่ตรงกับรหัสเชิญ ${dto.inviteCode}`
+          : `ไม่พบทริป ID: ${dto.tripId}`,
+      );
+    }
+
+    if (trip.status === 'CANCELLED') {
+      throw new BadRequestException('ไม่สามารถเข้าร่วมทริปนี้ได้เนื่องจากทริปถูกยกเลิกแล้ว');
+    }
+
+    // ตรวจสอบว่าเข้าร่วมแล้วหรือไม่
+    const existingMember = trip.members.find((m) => m.userId === userId);
+    if (existingMember) {
+      return {
+        message: 'คุณเป็นสมาชิกของทริปนี้อยู่แล้ว',
+        isAlreadyMember: true,
+        trip,
+        member: existingMember,
+      };
+    }
+
+    // สร้างข้อมูลสมาชิกใหม่ในทริป
+    const newMember = await this.prisma.tripMember.create({
+      data: {
+        tripId: trip.id,
+        userId,
+        role: 'MEMBER',
+        nickname: dto.nickname || null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'เข้าร่วมทริปสำเร็จ',
+      isAlreadyMember: false,
+      trip: {
+        ...trip,
+        members: [...trip.members, newMember],
+      },
+      member: newMember,
+    };
   }
 }
