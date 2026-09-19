@@ -1,0 +1,11 @@
+meta {
+  name: Get Matching Dates
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/trips/{{tripId}}/availabilities/match
+  body: none
+  auth: none
+}

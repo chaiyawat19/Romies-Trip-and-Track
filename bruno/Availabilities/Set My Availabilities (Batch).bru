@@ -1,0 +1,38 @@
+meta {
+  name: Set My Availabilities (Batch)
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/trips/{{tripId}}/availabilities/my
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "ranges": [
+      {
+        "startDate": "2026-11-20",
+        "endDate": "2026-11-23",
+        "status": "AVAILABLE",
+        "note": "ว่างเสาร์-อาทิตย์"
+      },
+      {
+        "startDate": "2026-11-27",
+        "endDate": "2026-11-29",
+        "status": "PREFERRED",
+        "note": "อยากไปสัปดาห์นี้มากกว่า"
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+meta {
+  name: Add Availability
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/availabilities
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "startDate": "2026-11-20",
+    "endDate": "2026-11-25",
+    "status": "AVAILABLE",
+    "note": "ว่างช่วงปลายสัปดาห์"
+  }
+}
