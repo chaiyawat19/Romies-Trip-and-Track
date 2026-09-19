@@ -11,7 +11,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { ExpenseCategory } from '@prisma/client';
+import { ExpenseCategory, SplitType } from '@prisma/client';
 
 export class CreateEqualExpenseDto {
   @IsString({ message: 'ชื่อรายการต้องเป็นตัวอักษร' })
@@ -23,6 +23,10 @@ export class CreateEqualExpenseDto {
   @IsNumber({}, { message: 'ยอดเงินรวมต้องเป็นตัวเลข' })
   @Min(0.01, { message: 'ยอดเงินต้องมากกว่า 0' })
   totalAmount: number;
+
+  @IsEnum(SplitType, { message: 'ประเภทการหารต้องเป็น EQUAL, ITEMIZED หรือ HYBRID' })
+  @IsOptional()
+  splitType?: SplitType = SplitType.EQUAL;
 
   @IsEnum(ExpenseCategory, { message: 'ประเภทค่าใช้จ่ายไม่ถูกต้อง' })
   @IsOptional()

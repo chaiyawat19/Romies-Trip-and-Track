@@ -112,7 +112,7 @@ export class ExpensesService {
           totalAmount: new Prisma.Decimal(total),
           subtotalAmount: new Prisma.Decimal(total),
           category: dto.category || 'FOOD',
-          splitType: 'EQUAL',
+          splitType: dto.splitType || 'EQUAL',
           expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
           receiptUrl: dto.receiptUrl || null,
           notes: dto.notes || null,
